@@ -2,6 +2,11 @@ require('dotenv').config();
 const app = require('express')();
 const axios = require('axios').default;
 const {Queue, Worker} = require('bullmq');
+const URL = require('url');
+const fs = require('fs');
+const path = require('path');
+const bodyParser = require('body-parser');
+
 const {s3} = require('./src/do-spaces');
 
 const client = axios.create({
@@ -40,6 +45,7 @@ const importWorker = new Worker(QUEUE_NAME, async (job) => {
   await job.updateProgress(30);
 
   const obj = await s3.putObject(params).promise().catch((err) =>{
+    console.log(err.stack);
     throw err;
   });
 
@@ -48,8 +54,13 @@ const importWorker = new Worker(QUEUE_NAME, async (job) => {
   return obj;
 }, {concurrency: 20});
 
+app.use(bodyParser.json());
 
-app.post('/import', async (_, res) =>{
+app.post('/import', async (req, res) =>{
+  if (req.body.secret !== process.env.IMPORT_SECRET) {
+    res.status(401).send('hmmmm');
+  }
+
   const {data} = await client.get(
       'https://raw.githubusercontent.com/FottyM/spurgeon-gems/master/json/spurgeongems.json', {
         responseType: 'json',
@@ -64,6 +75,53 @@ app.post('/import', async (_, res) =>{
     res.send(error).status(500);
   }
   res.status(200).send('import started...');
+});
+
+app.post('/generate-list', async (req, res)=>{
+  if (req.body.secret !== process.env.IMPORT_SECRET) {
+    res.status(401).send('hmmmm');
+  }
+
+  const {data: fromData} = await client.get(
+      'https://raw.githubusercontent.com/FottyM/spurgeon-gems/master/json/spurgeongems.json', {
+        responseType: 'json',
+      },
+  );
+
+  const gemMap = fromData.reduce(
+      (acc, curr) => {
+        const uriSplit = curr.uri.split('/');
+        const fileName = uriSplit[uriSplit.length - 1];
+        const key = `${curr.title} - ${fileName}`;
+        return acc.set(key, curr);
+      }, new Map(),
+  );
+
+  try {
+    const params = {
+      Bucket: process.env.DO_SPACES_NAME,
+    };
+
+    const data = await s3.listObjects(params).promise();
+    const list = data['Contents'].map((obj) => ({
+      ...gemMap.get(obj['Key']),
+      audioTitle: obj['Key'],
+      uri: URL.format(`https://${process.env.DO_SPACES_NAME}.${process.env.DO_SPACES_ENDPOINT_CDN}/${obj['Key']}`),
+    }));
+
+    const contentDir = path.resolve('json');
+    if (!fs.existsSync(path.resolve('json'))) {
+      fs.mkdirSync(contentDir);
+      fs.writeFileSync(
+          path.join(contentDir, 'do.json'), JSON.stringify(list, null, 2),
+      );
+    }
+
+    res.status(200).json(list);
+  } catch (error) {
+    console.error(error.stack);
+    res.status(500).send(error);
+  }
 });
 
 app.all('*', (_, res) =>{

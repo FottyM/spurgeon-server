@@ -11,11 +11,14 @@
   "author": "Fortunat Mutunda",
   "license": "ISC",
   "dependencies": {
+    "av": "^0.4.9",
     "aws-sdk": "^2.858.0",
     "axios": "^0.21.1",
+    "body-parser": "^1.19.0",
     "bullmq": "^1.14.7",
     "dotenv": "^8.2.0",
-    "express": "^4.17.1"
+    "express": "^4.17.1",
+    "mp3": "^0.1.0"
   },
   "devDependencies": {
     "eslint": "^7.21.0",
